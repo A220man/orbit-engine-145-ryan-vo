@@ -1,0 +1,41 @@
+{
+  "name": "orbit-engine-145-ryan-vo",
+  "version": "0.1.0",
+  "description": "Context window optimization for AI coding agents. Sandboxes tool output, persists session memory, and enforces routing across platforms via MCP + hooks.",
+  "type": "module",
+  "main": "dist/server.js",
+  "bin": {
+    "context-mode": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/cli.ts",
+    "start": "node dist/cli.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "keywords": [
+    "mcp",
+    "context-window",
+    "ai-coding",
+    "session-memory",
+    "sandbox"
+  ],
+  "author": "Ryan Vo <ryandtvo@gmail.com>",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "better-sqlite3": "^11.10.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  }
+}
