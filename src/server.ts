@@ -7,7 +7,7 @@ import {
   ErrorCode,
   McpError,
 } from "@modelcontextprotocol/sdk/types.js";
-import { z } from "zod";
+import { readFileSync } from "node:fs";
 import { SessionDB, getDefaultSessionDB } from "./session/db.js";
 import { executeInSandbox, executeBatch } from "./sandbox/executor.js";
 
@@ -135,11 +135,25 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "ctx_execute_file": {
         const parsed = ExecuteFileSchema.parse(args);
-        // For security, only allow executing files in current workspace
-        // This is a simplified implementation - real version would validate path
+        // Validate path is within workspace for security
+        const workspaceRoot = process.cwd();
+        const resolvedPath = new URL(parsed.path, `file://${workspaceRoot}/`).pathname;
+        if (!resolvedPath.startsWith(workspaceRoot)) {
+          throw new McpError(ErrorCode.InvalidParams, "Path must be within workspace");
+        }
+        // Determine language from file extension
+        const ext = resolvedPath.split(".").pop()?.toLowerCase();
+        let language: "javascript" | "typescript" | "python" | "bash" = "bash";
+        if (ext === "js" || ext === "mjs") language = "javascript";
+        else if (ext === "ts") language = "typescript";
+        else if (ext === "py") language = "python";
+        // Read file content and execute in sandbox
+        const { readFileSync } = await import("node:fs");
+        const code = readFileSync(resolvedPath, "utf-8");
         const result = await executeInSandbox({
-          language: "bash",
-          code: `${parsed.path} ${parsed.args?.join(" ") ?? ""}`,
+          language,
+          code,
+          cwd: parsed.cwd ?? workspaceRoot,
         });
         return {
           content: [{ type: "text", text: result.stdout }],
