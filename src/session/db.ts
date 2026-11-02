@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 -- Events table: every file edit, git op, task, error, decision
 CREATE TABLE IF NOT EXISTS session_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  session_id TEXT NOT NULL REFERENCES sessions(id),
   type TEXT NOT NULL,           -- 'file_edit' | 'git_op' | 'task' | 'error' | 'decision' | 'tool_call'
   timestamp INTEGER NOT NULL,
   payload_json TEXT NOT NULL,   -- structured event data
@@ -41,27 +41,10 @@ CREATE VIRTUAL TABLE IF NOT EXISTS session_events_fts USING fts5(
   tokenize = 'porter unicode61'
 );
 
--- Trigger to keep FTS in sync with session_events
-CREATE TRIGGER IF NOT EXISTS session_events_ai AFTER INSERT ON session_events BEGIN
-  INSERT INTO session_events_fts (session_id, type, timestamp, content)
-  VALUES (new.session_id, new.type, new.timestamp, new.payload_json);
-END;
-
-CREATE TRIGGER IF NOT EXISTS session_events_ad AFTER DELETE ON session_events BEGIN
-  INSERT INTO session_events_fts (session_events_fts, session_id, type, timestamp, content)
-  VALUES ('delete', old.session_id, old.type, old.timestamp, old.payload_json);
-END;
-
-CREATE TRIGGER IF NOT EXISTS session_events_au AFTER UPDATE ON session_events BEGIN
-  INSERT INTO session_events_fts (session_events_fts, session_id, type, timestamp, content)
-  VALUES ('delete', old.session_id, old.type, old.timestamp, old.payload_json);
-  INSERT INTO session_events_fts (session_id, type, timestamp, content)
-  VALUES (new.session_id, new.type, new.timestamp, new.payload_json);
-END;
-
 -- Index for session lookup by adapter + worktree
 CREATE INDEX IF NOT EXISTS idx_sessions_adapter_worktree ON sessions(adapter, worktree_hash);
 CREATE INDEX IF NOT EXISTS idx_events_session_ts ON session_events(session_id, timestamp);
+
 `;
 
 // ──────────────────────────────────────────────────────────────
@@ -116,6 +99,7 @@ export class SessionDB {
     }
     const dbPath = join(sessionsDir, "sessions.db");
     this.db = new Database(dbPath);
+    this.db.pragma("foreign_keys = ON");
     this.db.pragma("journal_mode = WAL");
     this.db.exec(SCHEMA);
   }
@@ -149,7 +133,9 @@ export class SessionDB {
   }
 
   deleteSession(id: string): void {
-    // Cascades to session_events and FTS via triggers
+    // Delete from FTS5 first, then events, then session
+    this.db.prepare(`DELETE FROM session_events_fts WHERE session_id = ?`).run(id);
+    this.db.prepare(`DELETE FROM session_events WHERE session_id = ?`).run(id);
     this.db.prepare(`DELETE FROM sessions WHERE id = ?`).run(id);
   }
 
@@ -166,7 +152,16 @@ export class SessionDB {
       VALUES (?, ?, ?, ?, ?)
     `);
     const result = stmt.run(sessionId, type, Date.now(), JSON.stringify(payload), tokensEstimate ?? null);
-    return result.lastInsertRowid as number;
+    const eventId = result.lastInsertRowid as number;
+
+    // Also insert into FTS5 for search
+    const ftsStmt = this.db.prepare(`
+      INSERT INTO session_events_fts (session_id, type, timestamp, content)
+      VALUES (?, ?, ?, ?)
+    `);
+    ftsStmt.run(sessionId, type, Date.now(), JSON.stringify(payload));
+
+    return eventId;
   }
 
   getEvents(sessionId: string, limit = 100, offset = 0): EventRow[] {
@@ -228,7 +223,7 @@ export class SessionDB {
   // ─── Cleanup ─────────────────────────────────────────────────
 
   purgeAll(): void {
-    this.db.exec(`DELETE FROM session_events; DELETE FROM sessions;`);
+    this.db.exec(`DELETE FROM session_events_fts; DELETE FROM session_events; DELETE FROM sessions;`);
   }
 
   close(): void {
@@ -244,7 +239,7 @@ let _defaultDB: SessionDB | null = null;
 
 export function getDefaultSessionDB(sessionsDir?: string): SessionDB {
   if (!_defaultDB) {
-    const dir = sessionsDir ?? join(__dirname, "..", "..", "..", ".context-mode", "sessions");
+    const dir = sessionsDir ?? join(__dirname, "..", "..", ".context-mode", "sessions");
     _defaultDB = new SessionDB(dir);
   }
   return _defaultDB;

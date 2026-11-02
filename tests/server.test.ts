@@ -1,9 +1,8 @@
-
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { SessionDB } from "../src/session/db.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { rmSync } from "node:fs";
+import { rmSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 
 describe("session database", () => {
@@ -76,5 +75,39 @@ describe("session database", () => {
 
     const events = db.getEvents(sessionId);
     expect(events).toHaveLength(0);
+  });
+
+  it("indexes file content and searches via FTS5", () => {
+    const sessionId = "test-session-index";
+    db.createSession(sessionId, "test-adapter");
+    
+    // Create a test file
+    const testFile = join(testDir, "test-file.ts");
+    const testContent = "export function hello() { return 'hello world'; }\nconst x = 42;\n";
+    writeFileSync(testFile, testContent);
+    
+    // Index the file
+    const indexedCount = db.recordEvent(sessionId, "file_content", { path: "test-file.ts", content: testContent });
+    expect(indexedCount).toBeGreaterThan(0);
+    
+    // Search for content
+    const results = db.search("hello", sessionId);
+    expect(results.length).toBeGreaterThan(0);
+    expect(results[0].content).toContain("hello world");
+  });
+
+  it("indexes long content with multiple chunks", () => {
+    const sessionId = "test-session-chunk";
+    db.createSession(sessionId, "test-adapter");
+    
+    // Create content with repeated distinctive words
+    const longContent = "function uniqueFunctionName() { return 'uniqueValue'; }\n".repeat(100);
+    const eventId = db.recordEvent(sessionId, "file_content", { path: "long.txt", content: longContent });
+    expect(eventId).toBeGreaterThan(0);
+    
+    // Search for the distinctive term
+    const results = db.search("uniqueFunctionName", sessionId);
+    expect(results.length).toBeGreaterThan(0);
+    expect(results[0].content).toContain("uniqueFunctionName");
   });
 });
