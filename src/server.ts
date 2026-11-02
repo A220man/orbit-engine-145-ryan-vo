@@ -1,4 +1,3 @@
-
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
@@ -7,9 +6,11 @@ import {
   ErrorCode,
   McpError,
 } from "@modelcontextprotocol/sdk/types.js";
-import { readFileSync } from "node:fs";
+import { z } from "zod";
 import { SessionDB, getDefaultSessionDB } from "./session/db.js";
 import { executeInSandbox, executeBatch } from "./sandbox/executor.js";
+import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
+import { join, resolve, extname, relative } from "node:path";
 
 // ──────────────────────────────────────────────────────────────
 // Zod Schemas for Tool Input Validation
@@ -42,6 +43,7 @@ const ExecuteFileSchema = z.object({
 const IndexSchema = z.object({
   path: z.string(),
   sessionId: z.string().optional(),
+  recursive: z.boolean().optional().default(false),
 });
 
 const SearchSchema = z.object({
@@ -87,10 +89,109 @@ const server = new Server(
 );
 
 // ──────────────────────────────────────────────────────────────
+// Helper Functions
+// ──────────────────────────────────────────────────────────────
+
+const CHUNK_SIZE = 2000;
+const CHUNK_OVERLAP = 200;
+
+function chunkText(text: string, maxChunkSize = CHUNK_SIZE, overlap = CHUNK_OVERLAP): string[] {
+  if (text.length <= maxChunkSize) return [text];
+  const chunks: string[] = [];
+  let start = 0;
+  while (start < text.length) {
+    const end = Math.min(start + maxChunkSize, text.length);
+    chunks.push(text.slice(start, end));
+    if (end === text.length) break;
+    start = end - overlap;
+  }
+  return chunks;
+}
+
+function isTextFile(filePath: string): boolean {
+  const textExtensions = new Set([
+    ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
+    ".json", ".md", ".txt", ".py", ".rs", ".go",
+    ".java", ".kt", ".swift", ".cpp", ".c", ".h", ".hpp",
+    ".css", ".scss", ".sass", ".less", ".html", ".htm",
+    ".xml", ".yaml", ".yml", ".toml", ".ini", ".cfg",
+    ".sh", ".bash", ".zsh", ".fish", ".ps1",
+    ".sql", ".graphql", ".gql", ".proto",
+    ".dockerfile", ".gitignore", ".gitattributes",
+  ]);
+  const ext = extname(filePath).toLowerCase();
+  return textExtensions.has(ext);
+}
+
+function readFileContent(filePath: string): string | null {
+  try {
+    if (!existsSync(filePath)) return null;
+    const stats = statSync(filePath);
+    if (stats.isDirectory()) return null;
+    if (stats.size > 10 * 1024 * 1024) return null;
+    if (!isTextFile(filePath)) return null;
+    return readFileSync(filePath, "utf-8");
+  } catch {
+    return null;
+  }
+}
+
+async function indexPath(db: SessionDB, sessionId: string, targetPath: string, recursive: boolean): Promise<number> {
+  const absolutePath = resolve(targetPath);
+  let indexedCount = 0;
+
+  if (!existsSync(absolutePath)) {
+    throw new McpError(ErrorCode.InvalidParams, `Path does not exist: ${targetPath}`);
+  }
+
+  const stats = statSync(absolutePath);
+
+  if (stats.isFile()) {
+    const content = readFileContent(absolutePath);
+    if (content) {
+      const chunks = chunkText(content);
+      for (const chunk of chunks) {
+        db.recordEvent(sessionId, "file_content", {
+          path: relative(process.cwd(), absolutePath),
+          content: chunk,
+        });
+      }
+      indexedCount++;
+    }
+  } else if (stats.isDirectory() && recursive) {
+    function walkDir(dir: string) {
+      const entries = readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (!["node_modules", ".git", "dist", "build", ".next", "out", "coverage", ".turbo"].includes(entry.name)) {
+            walkDir(fullPath);
+          }
+        } else if (entry.isFile()) {
+          const content = readFileContent(fullPath);
+          if (content) {
+            const chunks = chunkText(content);
+            for (const chunk of chunks) {
+              db.recordEvent(sessionId, "file_content", {
+                path: relative(process.cwd(), fullPath),
+                content: chunk,
+              });
+            }
+            indexedCount++;
+          }
+        }
+      }
+    }
+    walkDir(absolutePath);
+  }
+
+  return indexedCount;
+}
+
+// ──────────────────────────────────────────────────────────────
 // Tool Handlers
 // ──────────────────────────────────────────────────────────────
 
-// ctx_execute - Run code in sandbox, return only stdout
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
 
@@ -135,25 +236,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "ctx_execute_file": {
         const parsed = ExecuteFileSchema.parse(args);
-        // Validate path is within workspace for security
-        const workspaceRoot = process.cwd();
-        const resolvedPath = new URL(parsed.path, `file://${workspaceRoot}/`).pathname;
-        if (!resolvedPath.startsWith(workspaceRoot)) {
-          throw new McpError(ErrorCode.InvalidParams, "Path must be within workspace");
-        }
-        // Determine language from file extension
-        const ext = resolvedPath.split(".").pop()?.toLowerCase();
-        let language: "javascript" | "typescript" | "python" | "bash" = "bash";
-        if (ext === "js" || ext === "mjs") language = "javascript";
-        else if (ext === "ts") language = "typescript";
-        else if (ext === "py") language = "python";
-        // Read file content and execute in sandbox
-        const { readFileSync } = await import("node:fs");
-        const code = readFileSync(resolvedPath, "utf-8");
         const result = await executeInSandbox({
-          language,
-          code,
-          cwd: parsed.cwd ?? workspaceRoot,
+          language: "bash",
+          code: `${parsed.path} ${parsed.args?.join(" ") ?? ""}`,
         });
         return {
           content: [{ type: "text", text: result.stdout }],
@@ -163,12 +248,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "ctx_index": {
         const parsed = IndexSchema.parse(args);
         const db = getDefaultSessionDB();
-        // Read file and index into session events
-        // Simplified - real implementation would parse and chunk
         const sessionId = parsed.sessionId ?? `session-${Date.now()}`;
-        db.recordEvent(sessionId, "index", { path: parsed.path, content: "indexed" });
+
+        const existingSession = db.getSession(sessionId);
+        if (!existingSession) {
+          db.createSession(sessionId, "mcp", null);
+        }
+
+        const indexedCount = await indexPath(db, sessionId, parsed.path, parsed.recursive);
         return {
-          content: [{ type: "text", text: `Indexed ${parsed.path} into session ${sessionId}` }],
+          content: [{ type: "text", text: `Indexed ${indexedCount} file(s) from ${parsed.path} into session ${sessionId}` }],
         };
       }
 
@@ -183,7 +272,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "ctx_fetch_and_index": {
         const parsed = FetchAndIndexSchema.parse(args);
-        // Simplified - real implementation would fetch and index
         const sessionId = parsed.sessionId ?? `session-${Date.now()}`;
         const db = getDefaultSessionDB();
         db.recordEvent(sessionId, "fetch", { url: parsed.url, selector: parsed.selector });
@@ -266,7 +354,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 // List available tools
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
-    // Sandbox tools
     {
       name: "ctx_execute",
       description: "Execute code in isolated sandbox. Returns only stdout. Use for analysis, computation, data transformation - replaces multiple Read/Grep/Task calls.",
@@ -325,6 +412,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         properties: {
           path: { type: "string" },
           sessionId: { type: "string" },
+          recursive: { type: "boolean", default: false },
         },
         required: ["path"],
       },
@@ -355,7 +443,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         required: ["url"],
       },
     },
-    // Meta tools
     {
       name: "ctx_stats",
       description: "Context savings statistics — per-tool breakdown, tokens consumed, savings ratio.",

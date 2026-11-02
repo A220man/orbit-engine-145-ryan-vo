@@ -1,0 +1,33 @@
+
+# Source files (not needed in published package)
+src/
+tests/
+tsconfig.json
+*.md
+!README.md
+!CHANGELOG.md
+
+# Development files
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Database files
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+

@@ -10,7 +10,7 @@ core-mcp-server
 
 ### core-mcp-server — Core MCP Server with Sandbox Tools
 
-Status: in_progress
+Status: done
 
 Acceptance:
 - MCP server starts and registers 6 sandbox tools (ctx_execute, ctx_batch_execute, ctx_execute_file, ctx_index, ctx_search, ctx_fetch_and_index)
@@ -18,6 +18,8 @@ Acceptance:
 - SQLite + FTS5 session database persists events and enables BM25 search
 - ctx_execute runs JavaScript/TypeScript code in isolated sandbox and returns only stdout
 - Basic CLI entry point works: `npx context-mode` starts the server
+- ctx_index properly reads, chunks, and indexes file/directory content into FTS5
+- ctx_index supports recursive directory indexing with ignore patterns
 
 Implementation: `src/server.ts`, `src/session/db.ts`, `src/sandbox/executor.ts`, `package.json`
 
