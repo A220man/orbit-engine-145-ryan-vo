@@ -27,13 +27,17 @@ Tests: `tests/server.test.ts`, `tests/sandbox.test.ts`
 
 ### claude-code-plugin — Claude Code Plugin with Hooks
 
-Status: planned
+Status: in_progress
 
 Acceptance:
 - Plugin manifest registers all 6 hooks (PreToolUse, PostToolUse, UserPromptSubmit, PreCompact, SessionStart, Stop)
 - SessionStart hook injects routing instructions
 - Slash commands work: ctx-stats, ctx-doctor, ctx-index, ctx-search, ctx-upgrade, ctx-purge, ctx-insight
 - Status line integration works
+
+Implementation: `src/claude-code/manifest.json`, `src/claude-code/hooks.ts`, `src/claude-code/commands.ts`, `src/claude-code/status-line.ts`
+
+Tests: `tests/claude-code.test.ts`
 
 ### gemini-cli-support — Gemini CLI Configuration
 
