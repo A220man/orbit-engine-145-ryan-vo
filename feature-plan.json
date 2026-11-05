@@ -29,15 +29,22 @@
     {
       "id": "claude-code-plugin",
       "title": "Claude Code Plugin with Hooks",
-      "status": "planned",
+      "status": "in_progress",
       "acceptance": [
         "Plugin manifest registers all 6 hooks (PreToolUse, PostToolUse, UserPromptSubmit, PreCompact, SessionStart, Stop)",
         "SessionStart hook injects routing instructions",
         "Slash commands work: ctx-stats, ctx-doctor, ctx-index, ctx-search, ctx-upgrade, ctx-purge, ctx-insight",
         "Status line integration works"
       ],
-      "implementation": [],
-      "tests": []
+      "implementation": [
+        "src/claude-code/manifest.json",
+        "src/claude-code/hooks.ts",
+        "src/claude-code/commands.ts",
+        "src/claude-code/status-line.ts"
+      ],
+      "tests": [
+        "tests/claude-code.test.ts"
+      ]
     },
     {
       "id": "gemini-cli-support",

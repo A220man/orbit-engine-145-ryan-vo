@@ -14,3 +14,8 @@ __pycache__/
 *.sqlite3
 *.sqlite3-wal
 *.sqlite3-shm
+.turbo/
+.env
+.env.local
+.env.*.local
+**/data/media/
