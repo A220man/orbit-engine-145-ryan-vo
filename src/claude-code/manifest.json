@@ -1,0 +1,19 @@
+{
+  "name": "context-mode",
+  "version": "0.1.0",
+  "mcpServers": [
+    {
+      "command": "npx",
+      "args": ["context-mode"],
+      "cwd": "${workspaceFolder}"
+    }
+  ],
+  "hooks": [
+    "PreToolUse",
+    "PostToolUse",
+    "UserPromptSubmit",
+    "PreCompact",
+    "SessionStart",
+    "Stop"
+  ]
+}
