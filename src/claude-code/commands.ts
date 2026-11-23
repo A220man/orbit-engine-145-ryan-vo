@@ -8,8 +8,8 @@ export class ClaudeCodeCommands {
     this.sessionDB = sessionDB;
   }
 
-  async handleCtxStats(): Promise<any> {
-    return this.sessionDB.getSessionStats("current-session");
+  async handleCtxStats(sessionId: string = "current-session"): Promise<any> {
+    return this.sessionDB.getSessionStats(sessionId);
   }
 
   async handleCtxDoctor(): Promise<any> {
