@@ -45,6 +45,12 @@ export class ClaudeCodeHooks {
   // SessionStart: Inject routing instructions
   async sessionStart(sessionId: string, adapter: string): Promise<void> {
     console.log(`[Hook] SessionStart: ${adapter}`);
+    // Ensure session exists before recording events
+    const createStmt = this.sessionDB.db.prepare(
+      `INSERT OR IGNORE INTO sessions (id, adapter, worktree_hash, started_at, metadata_json) VALUES (?, ?, ?, ?, ?)`
+    );
+    createStmt.run(sessionId, adapter, null, Date.now(), JSON.stringify({}))
+
     await this.sessionDB.recordEvent(sessionId, "session_start", {
       adapter,
       message: "Routing instructions injected",

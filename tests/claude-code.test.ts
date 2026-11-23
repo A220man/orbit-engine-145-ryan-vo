@@ -44,7 +44,7 @@ describe("claude-code-plugin", () => {
 
   it("ctx-stats slash command works", async () => {
     db.createSession("stats-session", "test-adapter");
-    const result = await commands.handleCtxStats();
+    const result = await commands.handleCtxStats("stats-session");
     expect(result.sessionId).toBe("stats-session");
     expect(result.eventCount).toBeGreaterThanOrEqual(0);
   });
